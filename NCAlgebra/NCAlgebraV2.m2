@@ -23,7 +23,6 @@ export {NCModule,
 	identityMap,
 	subquotientAsCokernel,
 	NCChainComplex,
-	e,
 	qTensorProduct,
 	freeProduct,
 	--- Anick methods
@@ -112,17 +111,17 @@ subquotient(NCMatrix,Nothing) := (subgens,null) -> (
 
 subquotient(NCMatrix,NCMatrix) := (subgens,relns) -> (
      R := ring relns;
---     E := target subgens;
---     if E != target relns then error "expected maps with the same target"; -- we used to have =!=, but Schreyer orderings of free modules are discarded by "syz"
+--     E := subgens.target;
+--     if E != relns.target then error "expected maps with the same target"; -- we used to have =!=, but Schreyer orderings of free modules are discarded by "syz"
 --     rE := E.RawFreeModule;
---     n := rawRank rE;
+--     n := E.numgens;
      if subgens.target != relns.target then error "expected maps with the same target";
      n := #subgens.target;
      if n == 0 then new NCModule from (R,n)
      else (
 {*
-          relns = align matrix relns;
-          subgens = align matrix subgens;
+--          relns = align matrix relns;
+--          subgens = align matrix subgens;
           if E.?generators then (
                relns = E.generators * relns;
                subgens = E.generators * subgens;
@@ -143,7 +142,7 @@ subquotient(NCMatrix,NCMatrix) := (subgens,relns) -> (
           new NCModule of Vector from hashTable Mparts))
 
 -- The following checks will go in when NCMatrices have modules as source and target.
-{*
+
 subquotient(NCModule,NCMatrix,NCMatrix) := (F,g,r) -> (
      if F =!= target g or F =!= target r then error "expected module to be target of maps";
      subquotient(g,r))
@@ -154,8 +153,6 @@ subquotient(NCModule,NCMatrix,Nothing) := (F,g,r) -> (
      if F =!= target g then error "expected module to be target of maps";
      subquotient(g,r))
 subquotient(NCModule,Nothing,Nothing) := (F,g,r) -> F
-*}
-
 
 isNCModule = method(TypicalValue => Boolean)
 isNCModule Thing := M -> false
@@ -168,6 +165,71 @@ isSubmodule NCModule := M -> not M.?relations
 
 isQuotientModule NCModule := M -> not M.?generators
 
+{*
+NCModule == NCModule := (M,N) -> (
+     ring M === ring N
+     and degrees ambient M === degrees ambient N
+     and (
+          if M.?relations 
+          then N.?relations and (
+               -- if isHomogeneous N.relations and isHomogeneous M.relations
+               -- then gb N.relations == gb M.relations
+               -- else 
+                    (
+                    -- temporary
+                    isSubset(image M.relations, image N.relations)
+                    and
+                    isSubset(image N.relations, image M.relations)
+                    )
+               )
+               else not N.?relations
+          )
+     and (
+	  if M.?generators then (
+               if N.?generators then (
+                    f := (
+                         if M.?relations 
+                         then M.relations|M.generators
+                             else M.generators);
+                    g := (
+                         if N.?relations
+                         then N.relations|N.generators
+                         else N.generators);
+                    -- if isHomogeneous f and isHomogeneous g
+                    -- then gb f == gb g
+                    -- else 
+                         (
+                         -- temporary
+                             isSubset(image f, image g)
+                             and
+                             isSubset(image g, image f)
+                         )
+                    )
+               else (
+                    f = (
+                         if M.?relations
+                         then M.relations|M.generators
+                         else M.generators
+                         );
+                    if isHomogeneous f then f = substitute(f,0);
+                    isSubset(ambient N, image f)))
+          else (
+               if N.?generators then (
+                    g = (
+                         if N.?relations 
+                         then N.relations|N.generators 
+                         else N.generators
+                         );
+                    if isHomogeneous g then g = substitute(g,0);
+                    isSubset(ambient M, image g))
+               else true)))
+*}
+basis (ZZ, NCModule) := (d,M) -> (
+   -- the basis is the cokernel of the degree d part of the presentation matrix
+   P := if M.cache.?presentation then M.cache.presentation else presentation M;
+   degdP := P_d;
+   
+)
 
 ----------------------------------------------------------------------------
 
@@ -277,7 +339,7 @@ homologyAsCokernel(NCMatrix,NCMatrix) := (M,N) -> (
     if M*N != 0 then return "Error: maps do not compose to zero"
     else (
     B := N.ring;
-    Z := Z = zeroMap((N.target),(N.source),B);
+    Z := Z = zeroMap((N.target),(N.source),B); -- What is this for?
     kerM := rightKernelBergman(M);
     subquotientAsCokernel(kerM,N)
     )
@@ -310,6 +372,7 @@ homologyAsCokernel(M,L)
 
 --NCMatrix ** Matrix := 
 --Matrix ** NCMatrix := 
+-- what does this matrix represent?
 NCMatrix ** NCMatrix := (M,N) -> (
    entriesM := entries M;
    MtensN := ncMatrix applyTable(entriesM, e -> e*N);
@@ -324,10 +387,27 @@ NCMatrix ** NCMatrix := (M,N) -> (
 
 NCMatrix ++ NCMatrix := (M,N) -> (
    B := ring M;
-   urZero := zeroMap(M.target,N.source,B);
-   lrZero := zeroMap(N.target,M.source,B);
-   ds := ncMatrix {{M,urZero},{lrZero,N}};
-   assignDegrees(ds,M.target | N.target, M.source | N.source)
+   Mtar := M.target;
+   Msrc := M.source;
+   Ntar := N.target;
+   Nsrc := N.source;
+   urZero := zeroMap(Mtar,Nsrc,B);
+   lrZero := zeroMap(Ntar,Msrc,B);
+   -- this is a hack until ncMatrix can take lists of empty matrices
+   if Msrc == {} and Mtar == {} then N
+   else if Msrc == {} and Nsrc == {} then ncMatrix(B,Mtar|Ntar,{})
+   else if Msrc == {} and Ntar == {} then urZero
+   else if Msrc == {} then ncMatrix{{urZero},{N}}
+   else if Mtar == {} and Nsrc == {} then lrZero
+   else if Mtar == {} and Ntar == {} then ncMatrix(B,{},Msrc|Nsrc)
+   else if Mtar == {} then ncMatrix{{lrZero,N}}
+   else if Nsrc == {} and Ntar == {} then M
+   else if Nsrc == {} then ncMatrix{{M},{lrZero}}
+   else if Ntar == {} then ncMatrix{{M,urZero}}
+   else (
+      ds := ncMatrix {{M,urZero},{lrZero,N}};
+      assignDegrees(ds,M.target | N.target, M.source | N.source)
+   )
 )
 
 -------------------------------------------
@@ -337,7 +417,7 @@ NCChainComplex = new Type of HashTable
 
 resolution NCMatrix := opts -> M -> (
    i := 0;
-   numSyz := if opts#LengthLimit === infinity then numgens ring M else opts#LengthLimit;
+   numSyz := if opts#LengthLimit === infinity then numgens ring M - 1 else opts#LengthLimit;
    currentM := M;
    syzList := {M} | while (i < numSyz and currentM != 0) list (
       newM := rightKernelBergman currentM;
@@ -348,11 +428,13 @@ resolution NCMatrix := opts -> M -> (
 )
 
 betti NCChainComplex := opts -> C -> (
+    len := #C;
     firstbettis := flatten apply(
     	keys (tally (C#0).target), 
     	i -> {(0,(C#0).target,i) => (tally (C#0).target)_i}
     );
-    lastbettis := flatten flatten apply(#C-1, j -> 
+    if C#(len-1) == 0 then len = len - 1;
+    lastbettis := flatten flatten apply(len, j -> 
 	apply(
     	    keys (tally (C#j).source), 
     	    i -> {(j+1,(C#j).source,i) => (tally (C#j).source)_i}
@@ -362,6 +444,19 @@ betti NCChainComplex := opts -> C -> (
     B := new BettiTally from L
 )
 
+spots = C -> select(keys C, i -> class i === ZZ and C#i != 0)
+
+net NCChainComplex := C -> (
+   s := sort spots C;
+   if # s === 0 then "0"
+   else (
+      a := s#0;
+      b := s#-1;
+      A := ring C#a;
+      mostOfThem := horizontalJoin between(" <-- ", apply(a .. b, i -> stack ((net A) | (net (#(C#i.target)))^1," ",net i)));
+      mostOfThem | " <-- " |  stack ((net A) | (net (#(C#b.source)))^1," ",net (b+1))
+   )
+)
 
 TEST ///
 restart
@@ -411,9 +506,13 @@ identityMap (ZZ,NCRing) := (n,R) -> identityMap(toList(n:0),R)
 zeroMap = method()
 zeroMap (List, List, NCRing) := (tar,src,B) -> (
    R := coefficientRing B;
-   myZero := ncMatrix applyTable(entries map(R^#tar,R^#src,0), e -> promote(e,B));
-   assignDegrees(myZero,tar,src);
-   myZero
+   if tar == {} or src == {} then
+      ncMatrix(B,tar,src)
+   else (
+      myZero := ncMatrix applyTable(entries map(R^#tar,R^#src,0), e -> promote(e,B));
+      assignDegrees(myZero,tar,src);
+      myZero
+   )
 )
 
 NCMatrix _ ZZ := (M,d) -> (
@@ -434,49 +533,139 @@ Hom (ZZ,NCModule,NCModule) := (d,M,N) -> (
 )
 
 Hom (ZZ,NCMatrix,NCMatrix) := (d,M,N) -> (
-   -- if isFreeModule M then N ** (dual M) else (
+   -- This method uses Boehm's Algorithm 6.5.1 from "Computer Algebra: Lecture Notes" 
+   -- http://www.mathematik.uni-kl.de/~boehm/lehre/1213_CA/ca.pdf
+   --
+   -- That algorithm applies to modules over a commutative ring R, 
+   -- taking advantage of the fact that Hom(M,N) is an R-module in that case.
+   -- In our case, we must work on the level of graded vector spaces, as 
+   -- Hom(M,N) need not be an R-module if R is noncommutative
+   --
+   -- The setup here:
+   --
+   -- M and N are presentation matrices for a pair of graded modules over an NCRing 
+   -- We compute graded homomorphisms only; a degree d homomorphism M --> N is the
+   -- same as a degree 0 homomorphism M --> N[d]. The method returns a basis for 
+   -- the space of degree d homomorphisms. Each map is represented by a matrix.
+   -- The matrix is a lift of the homomorphism to a map between targets of presentation
+   -- matrices. That is, if B is the NCRing, a homomorphism from coker M to coker N is
+   -- a pair of maps completing the commutative diagram below. We return f as a matrix.
+   -- 
+   -- coker M <--- B^{s0} <-- M --- B^{s1}
+   --    |          |                 |
+   --    |          f                 g
+   --    |          |                 |
+   --	 v	    v                 v
+   -- coker N <--- B^{t0} <-- N --- B^{t1} 
+   --
+   -- The key to implementing Boehm's algorithm is the identification
+   -- Hom(B^n, B^m) = B^m \tensor (B^n)*
+   -- This identification is valid in the category of locally finite graded modules.
    B := ring M;
-   Nsyz := rightKernelBergman N;  -- be careful if Nsyz is zero!
-   L1 := identityMap(N.target,B);
-   K1 := L1 ** (transpose M);
-   L2 := identityMap(M.source,B);
-   L3 := identityMap(M.target,B);
-   L4 := identityMap(N.source,B);
+   -- it might be cleaner to shift N and set d=0
+
+   -- Step 1: We need the first syzygy module of N to deal with homotopy.
+   --
+   -- coker M <--- B^{s0} <-- M --- B^{s1}
+   --    |          |                 |
+   --    |          f                 g
+   --    |          |                 |
+   --	 v	    v                 v
+   -- coker N <--- B^{t0} <-- N --- B^{t1} <---- Nsyz ---- B^{t2}
+   
+   Nsyz := rightKernelBergman N; 
+   if Nsyz == ncMatrix{{promote(0,B)}} then Nsyz = zeroMap(N.source,{0},B);
+
+   -- Step 2: Compute the map "\delta"
+   --      Hom(B^{s0},B^{t0}) ++ Hom(B^{s1},B^{t1}) ----> Hom(B^{s1},B^{t0}) 
+   --               ( f, g ) |--->  f*M - N*g
+   -- since every homomorphism belongs to the kernel of this map. 
+   --
+   -- After the identifications mentioned above, the map is given by
+   --      id \tensor M* - N \tensor id*
+
+   L1 := identityMap(N.target,B); -- identity on B^t0
+   L2 := identityMap(M.source,B); -- identity on B^s1
+   K1 := L1 ** (transpose M);    
    K2 := N ** (transpose L2);
+   
+   -- Step 3: Compute the kernel of the map \delta in the prescribed degree
+   --
+   -- See below.
+   --
+   -- Step 4: Compute the map "\rho"
+   --      Hom(B^{s0},B^{t1}) ++ Hom(B^{s1},B^{t2}) ----> Hom(B^{s0},B^{t0}) ++ Hom(B^{s1},B^{t1}) 
+   --                ( h, k ) |--->  ( N*h, h*M - Nsyz*k )
+   --
+   -- We will ultimately return the quotient ker(\delta) / im(\rho)
+
+   L3 := identityMap(M.target,B); -- identity on B^s0
+   L4 := identityMap(N.source,B); -- identity on B^t1
    K3 := N ** (transpose L3);
    K4 := L4 ** (transpose M);
    K5 := Nsyz ** (transpose L2);
-   myZeroMap := zeroMap(K3.target,K5.source,B);
+   myZeroMap := zeroMap(K3.target,K5.source,B); -- this is a zero block of the appropriate size
+
+   -- Computing Hom in degree d
+   --
+   -- To do this at the vector space level, we replace every entry in the matrices constructed
+   -- above with a matrix representing right or left multiplication, as required by the formulas.
+   -- Some care must be taken with degree shifts in the source and target. In particular, some
+   -- columns will simply vanish for degree reasons. We must keep track of these, at least for K1.
+   
    K1ent := entries K1;
    K2ent := entries K2;
    K3ent := entries K3;
    K4ent := entries K4;
    K5ent := entries K5;
    myZeroMapEnt := entries myZeroMap;
-   --K := K1|K2;
-   --H := (K3 | myZeroMap) || (K4 | K5);
-   --H = K3 || K4   -- do this if Nsyz == 0
+   
+   -- The following tracks the source degrees of K1 where the conversion returns the empty matrix.
+   -- At the end, we'll go back and insert zeros if needed.
+   
+   sourceBasisSize := apply(#(K1.source),i-> # flatten entries basis(d-(K1.source)#i,B));
+   empties := positions(sourceBasisSize, i-> i==0);
+
+   -- Converting all matrices as described above.
+   
    K1' := matrix apply(#(K1.target), i -> apply(#(K1.source), j -> 
-	leftMultiplicationMap(K1ent#i#j, d - (K1.source)#j, d - (K1.target)#i)));
+	rightMultiplicationMap(K1ent#i#j, d - (K1.source)#j, d - (K1.target)#i)));
    K2' := matrix apply(#(K2.target), i -> apply(#(K2.source), j -> 
-	rightMultiplicationMap(-K2ent#i#j, d - (K2.source)#j, d - (K2.target)#i)));
+	leftMultiplicationMap(-K2ent#i#j, d - (K2.source)#j, d - (K2.target)#i)));
    K3' := matrix apply(#(K3.target), i -> apply(#(K3.source), j -> 
-	rightMultiplicationMap(-K3ent#i#j, d - (K3.source)#j, d - (K3.target)#i)));
+	leftMultiplicationMap(K3ent#i#j, d - (K3.source)#j, d - (K3.target)#i)));
    K4' := matrix apply(#(K4.target), i -> apply(#(K4.source), j -> 
-	leftMultiplicationMap(-K4ent#i#j, d - (K4.source)#j, d - (K4.target)#i)));
+	rightMultiplicationMap(K4ent#i#j, d - (K4.source)#j, d - (K4.target)#i)));
    K5' := matrix apply(#(K5.target), i -> apply(#(K5.source), j -> 
-	rightMultiplicationMap(-K5ent#i#j, d - (K5.source)#j, d - (K5.target)#i)));
+	leftMultiplicationMap(-K5ent#i#j, d - (K5.source)#j, d - (K5.target)#i)));
    myZeroMap' := matrix apply(#(myZeroMap.target), i -> apply(#(myZeroMap.source), j -> 
-   	   rightMultiplicationMap(-myZeroMapEnt#i#j, d - (myZeroMap.source)#j, d - (myZeroMap.target)#i)));
+        leftMultiplicationMap(-myZeroMapEnt#i#j, d - (myZeroMap.source)#j, d - (myZeroMap.target)#i)));
+   
+   -- The following are the matrix representations of the degree d part of \delta and \rho respectively.
+      
    K' := K1'|K2';
    H' := matrix {{K3',myZeroMap'},{K4',K5'}};
-   --H' = matrix {{K3'},{K4'}}  -- do this if Nsyz == 0
-   myHom := prune ((ker K') / (image H'));
+
+   -- Compute the subquotient. 
+   
+   myHom := prune ((ker K') / (image H')); 
+
+   -- Now reformat to output the map f. 
+   -- First minimize the generators and trim down so only f is returned. 
    homGens := mingens image(gens image myHom.cache.pruningMap)^(toList(0..(numgens source K1' - 1)));
+   
+   -- Convert back to NCMatrices (flattened into a vector at this point)
    basisMatr := fold(apply(#(K1.source), i -> basis(d-(K1.source)#i,B)), (a,b) -> a ++ b);
    flattenedMatrs := basisMatr * homGens;
-   retVal := apply(apply(#(flattenedMatrs.source), i -> flatten entries flattenedMatrs_{i}), L -> ncMatrix pack(#(N.target),L));
-   retVal
+   
+   -- Finally, insert zeros where needed.
+   toMingleZeros := zeroMap((K1.source)_empties,flattenedMatrs.source,B);
+   if flatten entries flattenedMatrs == {} then {}
+   else (
+      mingledFlatMatrs := ncMatrix functionMingle(entries flattenedMatrs,entries toMingleZeros,i->sourceBasisSize#i!=0); 
+      retVal := apply(apply(#(mingledFlatMatrs.source), i -> flatten entries mingledFlatMatrs_{i}), L -> ncMatrix pack(#(M.target),L));
+      retVal
+   )
 )
 
 TEST ///
@@ -490,15 +679,29 @@ subQuotientAsCokernel(M,N)
 ///
 
 TEST ///
+--- a 'production' example of a Hom computation
 restart
-needsPackage "NCAlgebraV2"
 needsPackage "NCAlgebra"
-B = threeDimSklyanin(QQ,{1,1,-1},{x,y,z})
-R = coefficientRing B
-M = ncMatrix {{x,y,0},{0,y,z}}
-N = ncMatrix {{x,y},{x,y}}
-Hom(M,N,2)
+needsPackage "NCAlgebraV2"
+A = skewPolynomialRing(QQ,(-1)_QQ,{x,y,z})
+B = QQ{p,q,r}
+setWeights(B,{1,3,5})
+f = ncMap(A,B,{x+y+z,x^3+y^3+z^3,x^5+y^5+z^5})
+relList = {p^2*q - q*p^2, p*q^2-q^2*p, 2*q^2-r*p-p*r,
+          4*p^8-12*p*q*p^4+3*p*q*p*q-12*q*p^5+3*q*p*q*p+38*q^2*p^2-12*q*r-12*r*q,
+	  12*r^2-5*q*p*q^2-5*p*q^3-10*p^4*q^2+5*p^6*q*p+5*p^7*q-2*p^10}
+C = B/(ncIdeal relList)
+M = ncMatrix {{p,q,0},{0,q,r}}
+assignDegrees(M,{0,0},{1,3,5})
+N = ncMatrix {{p,q^5},{p,r^3}}
+assignDegrees(N,{0,0},{1,15})
+Hom(0,M,M)
 ///
+
+TEST ///
+restart
+///
+
 
 -------------------------------------------
 --- Anick Resolution Methods --------------
@@ -555,13 +758,28 @@ first (D.vertexSet)
 vertexSet D
 
 --- all paths of length 4 ---
-findPaths(D,first (D,vertexSet),4)
+findPaths(D,first (D.vertexSet),4)
 --- verify... ---
 nChains(4,D)
+--------------
+--- code to build init file for anick resolution
+--- code to build .bi file for anick
+
 ///
 
 
 end
+
+restart
+needsPackage "NCAlgebraV2"
+needsPackage "NCAlgebra"
+A = skewPolynomialRing(QQ,(-1)_QQ,{x,y,z})
+setWeights(A,{2,4,6})
+basis(5,A)
+leftMultiplicationMap(x,5)
+setWeights(A,{3,4,6})
+leftMultiplicationMap(x,5)
+basis(8,A)*leftMultiplicationMap(x,5)
 
 --- bug fix/performance/interface improvements
 ------------------------------------
